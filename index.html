@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Earn Bot</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://app.adsgram.ai/js/adsgram-ad-sdk.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background: #f4f4f4; padding: 20px; }
+        .card { background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        button { background: #0088cc; color: white; border: none; padding: 10px 20px; border-radius: 10px; cursor: pointer; font-size: 16px; }
+        #balance { font-size: 24px; font-weight: bold; color: #333; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h1>My Earning App</h1>
+        <p>Your Balance:</p>
+        <div id="balance">0.00 Coins</div>
+        <br>
+        <button onclick="showAd()">Watch Ad to Earn</button>
+    </div>
+
+    <script>
+        let tg = window.Telegram.WebApp;
+        tg.expand(); // অ্যাপটি বড় করে ওপেন হবে
+
+        let balance = 0;
+        const AdController = window.Adsgram.init({ blockId: "YOUR_BLOCK_ID" }); // এখানে Adsgram-এর Block ID দিন
+
+        function showAd() {
+            AdController.show().then((result) => {
+                // বিজ্ঞাপন শেষ হলে ব্যালেন্স বাড়বে
+                balance += 10;
+                document.getElementById('balance').innerText = balance + " Coins";
+                alert("You earned 10 coins!");
+            }).catch((result) => {
+                alert("Ad skipped or error occurred.");
+            });
+        }
+    </script>
+</body>
+</html>
