@@ -2,16 +2,16 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PKD Earn - Play & Earn</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PKD Earn Pro - Play & Earn</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://app.adsgram.ai/js/adsgram-ad-sdk.js"></script>
     
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getDatabase, ref, get, set, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+        import { getDatabase, ref, get, set, update, push } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-        // আপনার Firebase Config
+        // আপনার Firebase Config (আগেরটাই ব্যবহার করা হয়েছে)
         const firebaseConfig = {
             apiKey: "AIzaSyAsyiJKWIH3ddyBt9vTJ5iB9PZeOTCdNMc",
             authDomain: "pkdearnbot.firebaseapp.com",
@@ -27,62 +27,347 @@
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
 
+        // Telegram WebApp Setup
         let tg = window.Telegram.WebApp;
         tg.expand();
+        tg.ready();
 
+        // ইউজার ডাটা এবং রেফারেন্স
         let userId = tg.initDataUnsafe.user?.id || "guest_user";
+        let userName = tg.initDataUnsafe.user?.first_name || "User";
+        let userPhoto = tg.initDataUnsafe.user?.photo_url || "https://via.placeholder.com/100";
         const userRef = ref(db, 'users/' + userId);
+        const withdrawRef = ref(db, 'withdrawals');
 
-        // ব্যালেন্স লোড করা
-        function loadBalance() {
+        // অ্যাপ ইনিশিয়ালাইজেশন
+        function initApp() {
+            // প্রোফাইল তথ্য সেট করা
+            document.getElementById('user-name').innerText = userName;
+            document.getElementById('user-avatar').src = userPhoto;
+
+            // ব্যালেন্স এবং ডাটা লোড করা
             get(userRef).then((snapshot) => {
                 if (snapshot.exists()) {
-                    document.getElementById('balance').innerText = snapshot.val().balance + " Coins";
+                    updateUI(snapshot.val());
                 } else {
-                    set(userRef, { balance: 0, name: tg.initDataUnsafe.user?.first_name || "User" });
-                    document.getElementById('balance').innerText = "0 Coins";
+                    // নতুন ইউজার তৈরি
+                    const newUser = {
+                        balance: 0,
+                        name: userName,
+                        joined: new Date().toISOString(),
+                        totalAdsWatched: 0
+                    };
+                    set(userRef, newUser);
+                    updateUI(newUser);
                 }
             });
         }
 
-        loadBalance();
+        function updateUI(userData) {
+            document.getElementById('balance-text').innerText = userData.balance + " Coins";
+            document.getElementById('total-ads').innerText = userData.totalAdsWatched || 0;
+            // টাকার পরিমাণ হিসাব (১০০০ কয়েন = ১০ টাকা উদাহরণস্বরূপ)
+            let money = (userData.balance / 100).toFixed(2);
+            document.getElementById('money-text').innerText = "≈ ৳ " + money;
+        }
 
-        // Adsgram Setup (আপনার আইডি ২৭২৫৭ বসানো হয়েছে)
-        const AdController = window.Adsgram.init({ blockId: "27257" });
+        initApp();
+
+        // --- Adsgram integration ---
+        // আপনার নতুন এবং Active Block ID এখানে বসান
+        const ADSGRAM_BLOCK_ID = "YOUR_ACTIVE_ADSGRAM_BLOCK_ID"; 
+        const AdController = window.Adsgram.init({ blockId: ADSGRAM_BLOCK_ID });
 
         window.showAd = function() {
+            // বাটন ডিজেবল করা
+            const adBtn = document.getElementById('ad-btn');
+            adBtn.disabled = true;
+            adBtn.innerText = "Loading Ad...";
+
             AdController.show().then((result) => {
+                // বিজ্ঞাপন সফল
                 get(userRef).then((snapshot) => {
-                    let currentBalance = snapshot.val()?.balance || 0;
-                    let newBalance = currentBalance + 10;
+                    let currentData = snapshot.val() || { balance: 0, totalAdsWatched: 0 };
+                    let newBalance = (currentData.balance || 0) + 10; // প্রতি অ্যাডে ১০ কয়েন
+                    let newTotalAds = (currentData.totalAdsWatched || 0) + 1;
                     
-                    update(userRef, { balance: newBalance });
-                    document.getElementById('balance').innerText = newBalance + " Coins";
-                    alert("অভিনন্দন! আপনি ১০ কয়েন পেয়েছেন।");
+                    update(userRef, { 
+                        balance: newBalance,
+                        totalAdsWatched: newTotalAds,
+                        lastAdWatched: new Date().toISOString()
+                    });
+                    
+                    updateUI({ balance: newBalance, totalAdsWatched: newTotalAds });
+                    tg.showAlert("অভিনন্দন! আপনি ১০ কয়েন পেয়েছেন।");
                 });
             }).catch((result) => {
-                alert("বিজ্ঞাপন লোড হয়নি বা আপনি স্কিপ করেছেন।");
+                tg.showAlert("বিজ্ঞাপন লোড হয়নি বা আপনি স্কিপ করেছেন।");
                 console.log("Adsgram error:", result);
+            }).finally(() => {
+                // বাটন এনাবল করা
+                adBtn.disabled = false;
+                adBtn.innerText = "WATCH AD & EARN (+10)";
             });
         };
+
+        // --- Withdrawal Logic ---
+        window.openWithdrawModal = function() {
+            document.getElementById('withdraw-modal').style.display = 'flex';
+        }
+
+        window.closeWithdrawModal = function() {
+            document.getElementById('withdraw-modal').style.display = 'none';
+        }
+
+        window.submitWithdrawal = function() {
+            let method = document.getElementById('withdraw-method').value;
+            let number = document.getElementById('withdraw-number').value;
+            let amountCoins = parseInt(document.getElementById('withdraw-amount').value);
+
+            if (!number || !amountCoins || amountCoins < 1000) {
+                tg.showAlert("দয়া করে সঠিক তথ্য দিন। নূন্যতম ১০০০ কয়েন (৳ ১০)।");
+                return;
+            }
+
+            get(userRef).then((snapshot) => {
+                let currentBalance = snapshot.val()?.balance || 0;
+                if (currentBalance < amountCoins) {
+                    tg.showAlert("আপনার পর্যাপ্ত ব্যালেন্স নেই।");
+                    return;
+                }
+
+                // ব্যালেন্স কমানো এবং রিকোয়েস্ট পাঠানো
+                let newBalance = currentBalance - amountCoins;
+                
+                const newWithdrawal = {
+                    userId: userId,
+                    userName: userName,
+                    method: method,
+                    number: number,
+                    amountCoins: amountCoins,
+                    amountMoney: (amountCoins / 100).toFixed(2),
+                    status: "pending",
+                    timestamp: new Date().toISOString()
+                };
+
+                update(userRef, { balance: newBalance });
+                push(withdrawRef, newWithdrawal);
+
+                updateUI({ balance: newBalance });
+                closeWithdrawModal();
+                tg.showAlert("আপনার উইথড্র রিকোয়েস্ট সফলভাবে জমা হয়েছে। ২৪-৪৮ ঘণ্টার মধ্যে পেমেন্ট পাবেন।");
+            });
+        }
+
+        // --- Navigation ---
+        window.showSection = function(sectionId) {
+            const sections = ['home-section', 'profile-section', 'withdraw-section'];
+            sections.forEach(id => {
+                document.getElementById(id).style.display = (id === sectionId) ? 'block' : 'none';
+            });
+
+            // Navigation Active Class
+            const navItems = document.querySelectorAll('.nav-item');
+            navItems.forEach(item => item.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+        }
     </script>
 
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #0f0c29; color: white; text-align: center; margin: 0; padding: 20px; }
-        .card { background: linear-gradient(to bottom, #24243e, #302b63, #0f0c29); border-radius: 20px; padding: 40px 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); margin-top: 50px; }
-        h1 { font-size: 28px; margin-bottom: 10px; color: #4ecca3; }
-        #balance { font-size: 45px; font-weight: bold; margin: 20px 0; color: #ffcc00; text-shadow: 0 0 10px rgba(255, 204, 0, 0.5); }
-        .btn { background: #e94560; color: white; border: none; padding: 15px 30px; font-size: 20px; border-radius: 50px; cursor: pointer; transition: 0.3s; width: 85%; max-width: 280px; font-weight: bold; box-shadow: 0 4px 15px rgba(233, 69, 96, 0.4); }
-        .btn:active { transform: scale(0.95); }
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --primary-color: #38bdf8;
+            --accent-color: #f472b6;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --success-color: #4ade80;
+            --danger-color: #f87171;
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 0; padding-bottom: 80px; overflow-x: hidden; }
+        
+        /* Header */
+        .header { background-color: var(--card-bg); padding: 15px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #334155; position: sticky; top: 0; z-color: 100; }
+        .app-title { font-size: 20px; font-weight: 800; color: var(--primary-color); letter-spacing: 1px; }
+        .profile-sm { display: flex; align-items: center; gap: 10px; }
+        .avatar-sm { width: 35px; height: 35px; border-radius: 50%; border: 2px solid var(--primary-color); }
+
+        /* Main Container */
+        .container { padding: 20px; }
+
+        /* Balance Card */
+        .balance-card { background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 100%); padding: 30px 20px; border-radius: 24px; text-align: center; box-shadow: 0 10px 25px rgba(56, 189, 248, 0.3); margin-bottom: 25px; color: #fff; }
+        .balance-label { font-size: 14px; opacity: 0.8; margin-bottom: 5px; }
+        .balance-main { font-size: 48px; font-weight: 800; margin: 0; line-height: 1; }
+        .money-main { font-size: 18px; opacity: 0.9; margin-top: 5px; }
+
+        /* Action Card */
+        .action-card { background-color: var(--card-bg); padding: 25px; border-radius: 20px; border: 1px solid #334155; margin-bottom: 20px; text-align: center; }
+        .card-title { font-size: 18px; font-weight: 700; margin-top: 0; margin-bottom: 10px; color: var(--text-main); }
+        .card-desc { font-size: 14px; color: var(--text-muted); margin-bottom: 20px; }
+
+        /* Buttons */
+        .btn { border: none; padding: 16px 25px; font-size: 16px; font-weight: 700; border-radius: 12px; cursor: pointer; transition: all 0.2s ease; width: 100%; letter-spacing: 0.5px; }
+        .btn:active { transform: scale(0.97); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-primary { background-color: var(--primary-color); color: #000; box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3); }
+        .btn-accent { background-color: var(--accent-color); color: #fff; box-shadow: 0 4px 12px rgba(244, 114, 182, 0.3); }
+        .btn-success { background-color: var(--success-color); color: #000; }
+
+        /* Profile Page */
+        .profile-header { text-align: center; margin-bottom: 30px; padding-top: 20px; }
+        .avatar-lg { width: 100px; height: 100px; border-radius: 50%; border: 4px solid var(--primary-color); margin-bottom: 15px; box-shadow: 0 0 20px rgba(56, 189, 248, 0.2); }
+        .profile-name { font-size: 24px; font-weight: 800; margin: 0; }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 25px; }
+        .stat-box { background-color: var(--card-bg); padding: 20px; border-radius: 16px; border: 1px solid #334155; text-align: center; }
+        .stat-val { font-size: 22px; font-weight: 700; color: var(--primary-color); }
+        .stat-lbl { font-size: 12px; color: var(--text-muted); text-transform: uppercase; margin-top: 5px; }
+
+        /* Withdraw Page */
+        .withdraw-info { background-color: #1e293b; border-left: 4px solid var(--accent-color); padding: 15px; border-radius: 8px; font-size: 14px; color: var(--text-muted); margin-bottom: 20px; }
+        .payment-methods { display: flex; gap: 10px; justify-content: center; margin-bottom: 20px; }
+        .method-icon { width: 50px; height: auto; opacity: 0.7; }
+
+        /* Navigation Bar */
+        .nav-bar { background-color: var(--card-bg); padding: 10px; display: flex; justify-content: space-around; position: fixed; bottom: 0; width: 100%; border-top: 1px solid #334155; z-color: 100; padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+        .nav-item { color: var(--text-muted); text-align: center; font-size: 12px; font-weight: 600; text-decoration: none; display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer; padding: 5px 15px; border-radius: 10px; transition: 0.2s; }
+        .nav-item i { font-size: 20px; }
+        .nav-item.active { color: var(--primary-color); background-color: rgba(56, 189, 248, 0.1); }
+
+        /* Modal / Popup */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); z-color: 200; justify-content: center; align-items: center; padding: 20px; }
+        .modal-content { background-color: var(--card-bg); padding: 30px; border-radius: 20px; width: 100%; max-width: 400px; position: relative; border: 1px solid #334155; animation: slideUp 0.3s ease; }
+        @keyframes slideUp { from { transform: translateY(50px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .close-modal { position: absolute; top: 15px; right: 15px; font-size: 24px; color: var(--text-muted); cursor: pointer; }
+        
+        /* Form Inputs */
+        .form-group { margin-bottom: 15px; text-align: left; }
+        .form-label { display: block; font-size: 14px; color: var(--text-muted); margin-bottom: 5px; font-weight: 600; }
+        .form-input, .form-select { width: 100%; padding: 14px; background-color: var(--bg-color); border: 1px solid #334155; border-radius: 10px; color: var(--text-main); font-size: 16px; }
+        .form-input:focus, .form-select:focus { border-color: var(--primary-color); outline: none; }
+
+        /* Helper Classes */
+        .hidden { display: none; }
     </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 </head>
 <body>
 
-    <div class="card">
-        <h1>PKD EARN</h1>
-        <p>Your Current Balance</p>
-        <div id="balance">Loading...</div>
-        <button class="btn" onclick="showAd()">WATCH AD & EARN</button>
+    <div class="header">
+        <div class="app-title">PKD EARN Pro</div>
+        <div class="profile-sm">
+            <img id="user-avatar" src="" alt="Avatar" class="avatar-sm">
+        </div>
+    </div>
+
+    <div class="container">
+
+        <div id="home-section">
+            <div class="balance-card">
+                <div class="balance-label">CURRENT BALANCE</div>
+                <div id="balance-text" class="balance-main">0 Coins</div>
+                <div id="money-text" class="money-main">≈ ৳ 0.00</div>
+            </div>
+
+            <div class="action-card">
+                <i class="fas fa-video fa-3x" style="color: var(--primary-color); margin-bottom: 15px;"></i>
+                <h3 class="card-title">Watch & Earn</h3>
+                <p class="card-desc">Watch a short video ad and earn 10 coins instantly.</p>
+                <button id="ad-btn" class="btn btn-primary" onclick="showAd()">WATCH AD & EARN (+10)</button>
+            </div>
+            
+            <div class="action-card" style="border-color: var(--accent-color);">
+                <i class="fas fa-money-bill-wave fa-3x" style="color: var(--accent-color); margin-bottom: 15px;"></i>
+                <h3 class="card-title">Instant Payout</h3>
+                <p class="card-desc">Minimum withdraw only 1000 coins (৳ 10) via bKash/Nagad.</p>
+                <button class="btn btn-accent" onclick="showSection('withdraw-section')">WITHDRAW NOW</button>
+            </div>
+        </div>
+
+        <div id="profile-section" class="hidden">
+            <div class="profile-header">
+                <img id="user-avatar-lg" src="" alt="Avatar" class="avatar-lg">
+                <h2 id="user-name" class="profile-name">User Name</h2>
+                <p style="color: var(--text-muted); margin-top: 5px;">Member</p>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div id="total-ads" class="stat-val">0</div>
+                    <div class="stat-lbl">Ads Watched</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-val">Active</div>
+                    <div class="stat-lbl">Status</div>
+                </div>
+            </div>
+            
+            <div class="action-card">
+                <h3 class="card-title">Support</h3>
+                <p class="card-desc">Need help? Contact our support team on Telegram.</p>
+                <button class="btn btn-primary" onclick="tg.openTelegramLink('https://t.me/your_support_username')">CONTACT SUPPORT</button>
+            </div>
+        </div>
+
+        <div id="withdraw-section" class="hidden">
+            <h2 class="card-title">Withdraw Funds</h2>
+            
+            <div class="withdraw-info">
+                <i class="fas fa-info-circle"></i> ১০০০ কয়েন = ১০ টাকা। নূন্যতম উইথড্র ১০ টাকা। পেমেন্ট প্রসেস হতে ২৪-৪৮ ঘণ্টা সময় লাগতে পারে।
+            </div>
+
+            <div class="payment-methods">
+                <img src="https://www.logo.wine/a/logo/BKash/BKash-Icon-Logo.wine.svg" alt="bKash" class="method-icon">
+                <img src="https://download.logo.wine/logo/Nagad/Nagad-Vertical-Logo.wine.svg" alt="Nagad" class="method-icon" style="width: 30px">
+            </div>
+
+            <div class="action-card">
+                <button class="btn btn-accent" onclick="openWithdrawModal()">REQUEST WITHDRAWAL</button>
+            </div>
+        </div>
+
+    </div> <div class="nav-bar">
+        <div class="nav-item active" onclick="showSection('home-section')">
+            <i class="fas fa-home"></i>
+            <span>Home</span>
+        </div>
+        <div class="nav-item" onclick="showSection('profile-section')">
+            <i class="fas fa-user"></i>
+            <span>Profile</span>
+        </div>
+        <div class="nav-item" onclick="showSection('withdraw-section')">
+            <i class="fas fa-wallet"></i>
+            <span>Wallet</span>
+        </div>
+    </div>
+
+    <div id="withdraw-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-modal" onclick="closeWithdrawModal()">&times;</span>
+            <h3 class="card-title" style="margin-bottom: 20px;">New Request</h3>
+            
+            <div class="form-group">
+                <label class="form-label">Payment Method</label>
+                <select id="withdraw-method" class="form-select">
+                    <option value="bkash">bKash (Personal)</option>
+                    <option value="nagad">Nagad (Personal)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Account Number</label>
+                <input type="tel" id="withdraw-number" class="form-input" placeholder="017xxxxxxxx">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Amount (Coins)</label>
+                <input type="number" id="withdraw-amount" class="form-input" placeholder="Min 1000" min="1000" step="100">
+            </div>
+
+            <button class="btn btn-success" onclick="submitWithdrawal()">SUBMIT REQUEST</button>
+        </div>
     </div>
 
 </body>
